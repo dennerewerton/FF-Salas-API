@@ -1,0 +1,12 @@
+{
+  "name": "portal-salas-lobbito",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check lib/contract.mjs && node --check lib/webhooks.mjs && node --check public/app.js",
+    "test": "node --test"
+  }
+}

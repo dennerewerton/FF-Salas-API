@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Configure, crie e acompanhe suas salas de Free Fire pela API da Lobbito.">
+  <title>Portal de Salas · Lobbito</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#conteudo">Ir para o conteúdo</a>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#nova-sala" aria-label="Portal de Salas, início">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span><strong>Portal de Salas</strong><small>Lobbito API</small></span>
+      </a>
+      <nav class="nav" aria-label="Navegação principal">
+        <a href="#nova-sala" data-nav="nova-sala" aria-current="location"><span class="nav-icon" aria-hidden="true">＋</span> Nova sala</a>
+        <a href="#historico" data-nav="historico"><span class="nav-icon" aria-hidden="true">◷</span> Histórico</a>
+        <a href="#resultados" data-nav="resultados"><span class="nav-icon" aria-hidden="true">▤</span> Resultados</a>
+        <a href="#conexao" data-nav="conexao"><span class="nav-icon" aria-hidden="true">◈</span> Conexão API</a>
+      </nav>
+      <a class="docs-link" href="https://api.lobbito.com.br/docs" target="_blank" rel="noopener noreferrer">Documentação da API <span class="sr-only">(nova aba)</span></a>
+    </aside>
+
+    <main id="conteudo" class="main">
+      <div class="topbar">
+        <span>Free Fire <span class="crumb">/</span> Salas personalizadas</span>
+        <a href="#conexao" class="connection-state" id="connection-state"><span class="dot" aria-hidden="true"></span><span id="connection-label">API desconectada</span></a>
+      </div>
+
+      <div class="content">
+        <header class="hero" id="nova-sala">
+          <div class="hero-copy">
+            <p class="eyebrow">SALAS DE FREE FIRE</p>
+            <h1>Crie sua sala<span>.</span></h1>
+            <p>Configure a partida, gere o acesso e compartilhe com os jogadores.</p>
+          </div>
+        </header>
+
+        <div class="dashboard">
+          <section class="panel form-panel" aria-labelledby="config-title">
+            <div class="panel-head"><h2 id="config-title">Configuração da sala</h2><p>Escolha como a partida vai funcionar.</p></div>
+            <form id="room-form">
+              <fieldset class="mode-section">
+                <legend>Tipo de partida</legend>
+                <div class="segments">
+                  <label><input type="radio" name="family" value="cs" checked><span>Contra Squad</span></label>
+                  <label><input type="radio" name="family" value="br"><span>Battle Royale</span></label>
+                </div>
+              </fieldset>
+              <fieldset class="mode-section">
+                <legend>Formato</legend>
+                <div class="mode-grid" id="modes"></div>
+              </fieldset>
+
+              <div class="field-grid">
+                <div class="field">
+                  <label for="map">Mapa</label>
+                  <div class="select-wrap"><select id="map" name="mapId"><option value="1">Bermuda</option></select></div>
+                </div>
+                <div class="field">
+                  <label for="room-password">Senha <span>Opcional</span></label>
+                  <input id="room-password" type="text" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" autocomplete="off" placeholder="Automática" aria-describedby="password-hint">
+                  <small id="password-hint">Use de 4 a 8 dígitos.</small>
+                </div>
+                <div class="field" id="capacity-field" hidden>
+                  <label for="capacity">Capacidade</label>
+                  <div class="select-wrap"><select id="capacity" name="maxPlayers"></select></div>
+                </div>
+              </div>
+
+              <details class="advanced">
+                <summary>Opções avançadas</summary>
+                <div class="advanced-body">
+                  <div class="field-grid">
+                    <div class="field">
+                      <label for="deadline">Prazo de entrada (minutos)</label>
+                      <input id="deadline" type="number" min="2" max="60" value="10" required>
+                    </div>
+                    <div class="field">
+                      <label for="reference">Referência <span>Opcional</span></label>
+                      <input id="reference" maxlength="100" placeholder="Ex.: treino-da-equipe">
+                    </div>
+                  </div>
+                  <fieldset id="cs-rules" class="mode-section">
+                    <legend>Regras de Contra Squad</legend>
+                    <div class="field-grid rules-grid">
+                      <div class="field"><label for="rule-gloo">Gelo infinito</label><div class="select-wrap"><select id="rule-gloo" data-rule="infiniteGloo"><option value="">Padrão do modo</option><option value="true">Ativar</option><option value="false">Desativar</option></select></div></div>
+                      <div class="field"><label for="rule-headshots">Só capa</label><div class="select-wrap"><select id="rule-headshots" data-rule="headshotsOnly"><option value="">Padrão do modo</option><option value="true">Ativar</option><option value="false">Desativar</option></select></div></div>
+                    </div>
+                  </fieldset>
+                  <fieldset class="mode-section team-options">
+                    <legend>Inscrição de jogadores</legend>
+                    <label class="check"><input type="checkbox" id="use-teams"> Restringir a sala aos jogadores inscritos</label>
+                    <div id="team-fields" class="team-fields" hidden>
+                      <p id="team-guide" class="helper"></p>
+                      <div class="field-grid" id="cs-teams">
+                        <div class="field"><label for="team-a">IDs do time A</label><textarea id="team-a" rows="2" maxlength="160" placeholder="123456789, 987654321"></textarea></div>
+                        <div class="field"><label for="team-b">IDs do time B</label><textarea id="team-b" rows="2" maxlength="160" placeholder="555555555, 666666666"></textarea></div>
+                      </div>
+                      <div id="br-teams" class="field" hidden><label for="team-lines">IDs por equipe</label><textarea id="team-lines" rows="4" maxlength="2000" placeholder="123456789, 987654321&#10;555555555, 666666666"></textarea></div>
+                      <label class="check"><input type="checkbox" id="auto-start" checked> Iniciar automaticamente quando todos estiverem prontos</label>
+                    </div>
+                  </fieldset>
+                  <fieldset class="mode-section result-options">
+                    <legend>Resultado da partida</legend>
+                    <label class="check"><input type="checkbox" id="auto-result" checked aria-describedby="auto-result-hint"> Acompanhar o resultado pela Lobbito</label>
+                    <p class="helper" id="auto-result-hint"></p>
+                  </fieldset>
+                </div>
+              </details>
+
+              <div class="form-footer">
+                <p id="form-message" class="notice" aria-live="polite" hidden></p>
+                <button type="submit" class="button primary" id="create"><span aria-hidden="true">＋</span> <span id="create-label">Criar sala</span></button>
+                <p class="helper" id="quota-hint">A criação usa a cota de salas da sua conta Lobbito.</p>
+              </div>
+            </form>
+          </section>
+
+          <div class="dashboard-side">
+            <section class="panel summary-panel" aria-labelledby="summary-title">
+              <div class="panel-head"><h2 id="summary-title">Resumo da sala</h2><p id="summary-description">Confira a configuração antes de criar.</p></div>
+              <div class="match" id="match" aria-hidden="true">
+                <div class="match-team"><div class="players" id="players-a"></div><small>TIME A</small></div>
+                <span class="vs">VS</span>
+                <div class="match-team"><div class="players team-b" id="players-b"></div><small>TIME B</small></div>
+              </div>
+              <dl class="summary-list" id="summary-list"></dl>
+              <section id="result" class="result" aria-label="Situação da sala" hidden>
+                <div class="result-head"><strong id="result-title"></strong><span class="pill" id="result-status" aria-live="polite"></span></div>
+                <p class="helper" id="result-message"></p>
+                <dl class="summary-list" id="result-details"></dl>
+                <section class="match-result" id="match-result" aria-labelledby="match-result-title" hidden>
+                  <div class="result-head">
+                    <h3 id="match-result-title">Resultado da partida</h3>
+                    <span class="pill" id="match-result-status" aria-live="polite"></span>
+                  </div>
+                  <p id="match-result-summary" aria-live="polite"></p>
+                  <div class="table-scroll" id="match-team-table" hidden>
+                    <table><caption>Classificação</caption><thead><tr><th scope="col">Posição</th><th scope="col">Equipe</th></tr></thead><tbody id="match-team-rows"></tbody></table>
+                  </div>
+                  <div class="table-scroll" id="match-player-table" hidden>
+                    <table><caption>Estatísticas dos jogadores</caption><thead id="match-player-head"></thead><tbody id="match-player-rows"></tbody></table>
+                  </div>
+                </section>
+                <div class="result-actions">
+                  <button type="button" class="button primary compact" id="start-room" hidden>Iniciar partida</button>
+                  <button type="button" class="button danger" id="cancel-room" hidden>Cancelar sala</button>
+                  <button type="button" class="button secondary" id="copy-room" hidden>Copiar acesso</button>
+                  <button type="button" class="button secondary" id="refresh-room" hidden>Atualizar status</button>
+                  <button type="button" class="button secondary" id="retry-room" hidden>Verificar pedido</button>
+                </div>
+                <p id="room-action-message" class="notice" aria-live="polite" hidden></p>
+              </section>
+            </section>
+
+            <section class="panel connection-panel" id="conexao" aria-labelledby="connection-title">
+              <div class="panel-head"><h2 id="connection-title">Conexão API</h2><p id="connection-description">Use a chave da sua conta Lobbito.</p></div>
+              <form id="connection-form" autocomplete="off">
+                <div class="field"><label for="api-key">Chave de API</label><input id="api-key" type="password" required maxlength="256" spellcheck="false" autocomplete="off" placeholder="lbt_live_…" autocapitalize="none"></div>
+                <button type="submit" class="button secondary" id="connect">Conectar à API</button>
+              </form>
+              <div id="connected" hidden>
+                <dl class="summary-list" id="account-info"></dl>
+                <button type="button" class="button secondary" id="disconnect">Desconectar</button>
+              </div>
+              <p id="connection-message" class="notice" aria-live="polite" hidden></p>
+              <a id="get-key" class="text-link" href="https://api.lobbito.com.br/painel" target="_blank" rel="noopener noreferrer">Obter chave no painel <span class="sr-only">(nova aba)</span></a>
+            </section>
+          </div>
+        </div>
+
+        <section class="panel history-panel" id="historico" aria-labelledby="history-title">
+          <div class="panel-head history-head"><div><h2 id="history-title">Histórico de salas</h2><p>Consulte as salas criadas na sua conta.</p></div><button type="button" class="button secondary" id="refresh-history" disabled>Atualizar</button></div>
+          <p id="history-message" class="notice" aria-live="polite">Conecte sua chave para consultar o histórico.</p>
+          <div class="table-scroll" id="room-table" hidden>
+            <table><thead><tr><th scope="col">Sala</th><th scope="col">Formato</th><th scope="col">Status</th><th scope="col">Resultado</th><th scope="col">Criação</th><th scope="col"><span class="sr-only">Ação</span></th></tr></thead><tbody id="history-rows"></tbody></table>
+          </div>
+          <button type="button" class="button secondary" id="load-more" hidden>Carregar mais</button>
+        </section>
+        <section class="panel history-panel" id="resultados" aria-labelledby="inbox-title">
+          <div class="panel-head history-head"><div><h2 id="inbox-title">Resultados recebidos</h2><p>Notificações enviadas pela Lobbito ao portal.</p></div><button type="button" class="button secondary" id="refresh-inbox" disabled>Atualizar</button></div>
+          <div id="inbox-connection" hidden>
+            <dl class="summary-list inbox-summary" id="inbox-status"></dl>
+            <details class="advanced inbox-config">
+              <summary>Configuração do webhook</summary>
+              <div class="advanced-body">
+                <div id="inbox-url-field" class="field" hidden>
+                  <label for="inbox-url">URL para cadastrar na Lobbito</label>
+                  <div class="inbox-url"><input id="inbox-url" type="url" readonly><button type="button" class="button secondary" id="copy-inbox-url">Copiar URL</button></div>
+                </div>
+                <p class="helper" id="inbox-config-help"></p>
+                <a class="text-link" href="https://api.lobbito.com.br/docs#webhooks" target="_blank" rel="noopener noreferrer">Documentação de webhooks <span class="sr-only">(nova aba)</span></a>
+              </div>
+            </details>
+          </div>
+          <p id="inbox-message" class="notice" aria-live="polite">Conecte sua chave para consultar os resultados recebidos.</p>
+          <div class="table-scroll" id="inbox-table" hidden>
+            <table><thead><tr><th scope="col">Sala</th><th scope="col">Formato</th><th scope="col">Resultado</th><th scope="col">Recebido em</th><th scope="col"><span class="sr-only">Ação</span></th></tr></thead><tbody id="inbox-rows"></tbody></table>
+          </div>
+        </section>
+        <footer>Portal de Salas <span>·</span> Integrado à Lobbito API</footer>
+      </div>
+    </main>
+  </div>
+  <dialog id="cancel-dialog" aria-labelledby="cancel-dialog-title" aria-describedby="cancel-dialog-info">
+    <h2 id="cancel-dialog-title">Cancelar esta sala?</h2>
+    <p id="cancel-dialog-info">A sala será fechada e a vaga será liberada. A criação continua contando na sua cota.</p>
+    <form method="dialog" class="dialog-actions">
+      <button class="button secondary" type="submit" value="keep" autofocus>Manter sala</button>
+      <button class="button danger" type="submit" value="cancel">Confirmar cancelamento</button>
+    </form>
+  </dialog>
+</body>
+</html>
