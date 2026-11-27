@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { HttpError, ROOM_ID, pendingRoom, publicAccount, publicModes, publicRoom, roomRequest } from './lib/contract.mjs';
+import { HttpError, ROOM_ID, pendingRoom, publicAccount, publicCharacterValidation, publicModes, publicRoom, roomRequest } from './lib/contract.mjs';
 import { openWebhooks } from './lib/webhooks.mjs';
 
 const API_ORIGIN = 'https://api.lobbito.com.br';
@@ -40,6 +40,11 @@ const errorMessages = {
   idempotency_conflict: 'A Lobbito detectou um conflito neste pedido de criação.',
 };
 
+const characterStartErrors = {
+  characters_not_allowed: 'Há habilidades incompatíveis com as regras da sala. Peça aos jogadores indicados para trocar as habilidades antes de iniciar.',
+  character_validation_unavailable: 'A Lobbito ainda não conseguiu conferir as habilidades equipadas. Verifique a sala e tente iniciar novamente quando a conferência estiver disponível.',
+};
+
 function actionUnconfirmed() {
   return new HttpError(502, 'action_unconfirmed', 'A Lobbito ainda não confirmou a ação. Consulte o status da sala antes de tentar novamente.');
 }
@@ -54,6 +59,12 @@ function upstreamError(response, data, creating, action) {
   };
 
   if (action && (response.status >= 500 || response.status === 408)) return actionUnconfirmed();
+  if (action === 'start' && response.status === 409 && typeof code === 'string' && Object.hasOwn(characterStartErrors, code)) {
+    const characterValidation = publicCharacterValidation(data.error.details?.characterValidation);
+    return new HttpError(409, code, characterStartErrors[code], {
+      ...options, details: characterValidation ? { characterValidation } : undefined,
+    });
+  }
   if (typeof code === 'string' && Object.hasOwn(errorMessages, code)) {
     return new HttpError(response.status, code, errorMessages[code], options);
   }
@@ -224,14 +235,14 @@ async function lookupAccount(fetchApi, key) {
 
 async function lookupRoom(fetchApi, session, id) {
   const { data } = await lobbito(fetchApi, session.key, `/v1/rooms/${id}`);
-  const room = publicRoom(data?.room ?? data);
+  const room = publicRoom(data?.room ?? data, { includeCharacterValidation: true });
   if (room?.id !== id) throw invalidResponse();
   return room;
 }
 
 async function roomAction(fetchApi, session, id, action) {
-  const { data, status } = await lobbito(fetchApi, session.key, `/v1/rooms/${id}/${action}`, { action: true });
-  let room = publicRoom(data?.room ?? data);
+  const { data, status } = await lobbito(fetchApi, session.key, `/v1/rooms/${id}/${action}`, { action });
+  let room = publicRoom(data?.room ?? data, { includeCharacterValidation: true });
   if (room?.id !== id) {
     try {
       room = await lookupRoom(fetchApi, session, id);
@@ -249,7 +260,7 @@ async function sendAttempt(fetchApi, session, attempt, response) {
   attempt.inFlight = true;
   try {
     const { data, status } = await lobbito(fetchApi, session.key, '/v1/rooms', { attempt });
-    const room = publicRoom(data?.room ?? data);
+    const room = publicRoom(data?.room ?? data, { includeCharacterValidation: true });
     if (!room) throw invalidResponse(true);
     assignRoom(attempt, room);
     json(response, status, { room });

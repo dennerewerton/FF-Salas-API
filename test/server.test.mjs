@@ -246,6 +246,96 @@ test('valida senha, prazo, equipes, capacidade e regras antes de consumir chamad
   assert.deepEqual(lastPayload, cs);
 });
 
+test('expõe o catálogo de personagens e encaminha a restrição em Contra Squad e Battle Royale', async (t) => {
+  const submissions = [];
+  const { request, login } = await fixture(t, (url, input) => {
+    if (url.pathname === '/v1/modes') return api({ settings: {
+      characters: [
+        { id: 101, name: 'Personagem A', internal: 'DADO_INTERNO' },
+        { id: 202, name: 'Personagem B' }, { id: 101, name: 'Duplicado' },
+        { id: 'id-inválido', name: 'Ocultar' }, { id: 303, name: '  ' },
+      ],
+      privateRules: 'DADO_INTERNO',
+    } });
+    assert.equal(url.pathname, '/v1/rooms');
+    submissions.push(JSON.parse(input.body));
+    return api(readyRoom, 201);
+  });
+  const { cookie } = await login();
+  const modes = await request('/api/modes', { cookie });
+  assert.deepEqual(modes.data.characters, [{ id: 101, name: 'Personagem A' }, { id: 202, name: 'Personagem B' }]);
+  assert.doesNotMatch(JSON.stringify(modes.data), /DADO_INTERNO|Duplicado|Ocultar/);
+
+  const create = (body) => request('/api/rooms', { method: 'POST', cookie, body });
+  const cs = { mode: '2x2', settings: { headshotsOnly: true, allowedCharacterIds: [101, 202] } };
+  const br = { mode: 'br-squad', maxPlayers: 12, settings: { allowedCharacterIds: [202] } };
+  const unrestricted = { mode: 'br-duo', maxPlayers: 8, settings: { allowedCharacterIds: [] } };
+  for (const payload of [cs, br, unrestricted]) assert.equal((await create(payload)).status, 201);
+  assert.deepEqual(submissions, [cs, br, unrestricted]);
+
+  for (const allowedCharacterIds of [null, '101', [101, 101], ['101'], [1.5], [Number.MAX_SAFE_INTEGER + 1]]) {
+    assert.equal((await create({ mode: '2x2', settings: { allowedCharacterIds } })).status, 400);
+  }
+  assert.equal((await create({ ...br, settings: { ...br.settings, headshotsOnly: true } })).status, 400);
+  assert.equal((await create({ mode: '2x2', settings: { allowedPetIds: [1] } })).status, 400);
+  assert.equal(submissions.length, 3);
+});
+
+test('consulta a conferência da própria sala e sanitiza os detalhes de bloqueios no início', async (t) => {
+  let failures = 0;
+  const checkedAt = '2026-11-26T22:30:00.000Z';
+  const invalidValidation = {
+    status: 'INVALID', checkedAt, internalCapture: 'DADO_INTERNO',
+    violations: [
+      { accountId: '00123456', characterId: 202, characterName: 'Personagem B', reason: 'NOT_ALLOWED', capture: 'DADO_INTERNO' },
+      { accountId: 654321, reason: 'UNKNOWN_CHARACTER' },
+      { accountId: 654321, reason: 'DADO_INTERNO' },
+      { accountId: 'DADO_INTERNO', reason: 'NOT_ALLOWED' },
+    ],
+  };
+  const expected = { status: 'INVALID', checkedAt, violations: [
+    { accountId: '00123456', characterId: 202, characterName: 'Personagem B', reason: 'NOT_ALLOWED' },
+    { accountId: '654321', characterId: null, characterName: null, reason: 'UNKNOWN_CHARACTER' },
+  ] };
+  const room = { ...readyRoom, characterValidation: invalidValidation };
+  const { request, login } = await fixture(t, (url, input) => {
+    if (input.headers.Authorization === `Bearer ${testKeyBeta}`) return api({ error: { code: 'not_found' } }, 404);
+    if (url.pathname === '/v1/rooms' && input.method === 'GET') return api({ data: [room] });
+    if (url.pathname.endsWith('/cancel')) return api({ error: {
+      code: 'characters_not_allowed', message: 'DADO_INTERNO', details: { characterValidation: invalidValidation },
+    } }, 409);
+    if (url.pathname.endsWith('/start')) {
+      failures++;
+      const characterValidation = failures === 1 ? invalidValidation : { status: 'UNAVAILABLE', checkedAt: 'DADO_INTERNO' };
+      const code = failures === 1 ? 'characters_not_allowed' : 'character_validation_unavailable';
+      return api({ error: { code, message: 'DADO_INTERNO', details: { characterValidation, raw: 'DADO_INTERNO' } } }, 409);
+    }
+    if (input.method === 'POST') return api({ ...room, characterValidation: { status: 'PENDING' } }, 201);
+    return api(room);
+  });
+  const { cookie } = await login();
+  const beta = await login(testKeyBeta);
+  const path = `/api/rooms/${room.id}`;
+  assert.equal((await request(path, { cookie: beta.cookie })).status, 404);
+  const created = await request('/api/rooms', { method: 'POST', cookie, body: { mode: '2x2', settings: { allowedCharacterIds: [101] } } });
+  assert.deepEqual(created.data.room.characterValidation, { status: 'PENDING', checkedAt: null, violations: [] });
+  assert.deepEqual((await request(path, { cookie })).data.characterValidation, expected);
+  assert.equal(Object.hasOwn((await request('/api/rooms', { cookie })).data.data[0], 'characterValidation'), false);
+
+  const denied = await request(`${path}/start`, { method: 'POST', cookie });
+  assert.equal(denied.status, 409);
+  assert.equal(denied.data.error.code, 'characters_not_allowed');
+  assert.deepEqual(denied.data.error.details, { characterValidation: expected });
+  assert.doesNotMatch(JSON.stringify(denied.data), /DADO_INTERNO/);
+  const unavailable = await request(`${path}/start`, { method: 'POST', cookie });
+  assert.equal(unavailable.data.error.code, 'character_validation_unavailable');
+  assert.deepEqual(unavailable.data.error.details.characterValidation, { status: 'UNAVAILABLE', checkedAt: null, violations: [] });
+  const cancel = await request(`${path}/cancel`, { method: 'POST', cookie });
+  assert.equal(cancel.status, 409);
+  assert.equal(cancel.data.error.code, 'invalid_state');
+  assert.equal(cancel.data.error.details, undefined);
+});
+
 test('inicia ou cancela na Lobbito com a chave da sessão e consulta a sala quando necessário', async (t) => {
   const roomPath = `/v1/rooms/${readyRoom.id}`;
   const { request, login, calls } = await fixture(t, (url, input) => {

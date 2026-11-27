@@ -20,8 +20,12 @@ const statusInfo = {
 };
 const dateFormat = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 const numberFormat = new Intl.NumberFormat('pt-BR');
+const minimumCharacterMessage = 'Deixe pelo menos um personagem liberado para criar a sala com bloqueios.';
 
 let catalog = defaultModes;
+let characters = [];
+let loadingModes = false;
+const blockedCharacters = new Set();
 let family = 'cs';
 let mode = defaultModes[1];
 let connected = false;
@@ -91,6 +95,7 @@ async function api(path, { method = 'GET', body } = {}) {
   const error = new Error(data.error?.message ?? 'Não foi possível concluir a solicitação.');
   error.code = data.error?.code;
   error.room = data.room;
+  error.characterValidation = data.error?.details?.characterValidation;
   error.retryAfter = Number(response.headers.get('Retry-After')) || 0;
   throw error;
 }
@@ -151,6 +156,56 @@ function renderModeFields() {
   renderSummary();
 }
 
+function searchText(value) {
+  return value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
+}
+
+function filterCharacters() {
+  const query = searchText(byId('character-search').value);
+  let visible = 0;
+  for (const choice of byId('character-list').children) {
+    choice.hidden = !choice.dataset.search.includes(query);
+    if (!choice.hidden) visible += 1;
+  }
+  byId('no-character-matches').hidden = visible > 0;
+}
+
+function renderCharacterSelection() {
+  const count = blockedCharacters.size;
+  const allowed = characters.length - count;
+  const label = count === 1 ? '1 bloqueado' : `${count} bloqueados`;
+  const badge = byId('character-badge');
+  badge.hidden = count === 0;
+  badge.textContent = label;
+  byId('clear-characters').disabled = count === 0;
+  byId('character-count').textContent = count === 0 ? 'Sem bloqueios'
+    : allowed === 0 ? 'Deixe pelo menos um personagem liberado.'
+      : `${label} · ${allowed === 1 ? '1 liberado' : `${allowed} liberados`}`;
+  if (allowed > 0 && byId('form-message').textContent === minimumCharacterMessage) notice('form-message', '');
+  renderSummary();
+}
+
+function renderCharacterPicker() {
+  byId('character-picker').hidden = characters.length === 0 || loadingModes;
+  byId('retry-character-catalog').hidden = !connected || loadingModes || characters.length > 0;
+  const message = !connected ? 'Conecte sua chave da Lobbito para carregar o catálogo.'
+    : loadingModes ? 'Carregando personagens…'
+      : !characters.length ? 'A Lobbito não disponibilizou o catálogo de personagens nesta sessão.' : '';
+  notice('character-catalog-message', message);
+  byId('character-list').replaceChildren(...characters.map(({ id, name }) => {
+    const choice = element('label', undefined, 'character-choice');
+    choice.dataset.search = searchText(`${name} ${id}`);
+    const input = element('input');
+    input.type = 'checkbox';
+    input.value = id;
+    input.checked = blockedCharacters.has(id);
+    choice.append(input, element('span', name));
+    return choice;
+  }));
+  filterCharacters();
+  renderCharacterSelection();
+}
+
 function renderSummary() {
   const isBr = family === 'br';
   const size = mode?.teamSize ?? 0;
@@ -162,6 +217,7 @@ function renderSummary() {
     ['Jogadores', mode ? (isBr ? `Até ${byId('capacity').value}` : String(size * 2)) : null],
     ['Prazo de entrada', byId('deadline').validity.valid ? `${byId('deadline').value} min` : null],
     ['Senha', byId('room-password').value ? 'Personalizada' : 'Automática'],
+    ...(blockedCharacters.size ? [['Personagens bloqueados', blockedCharacters.size]] : []),
   ]);
   const blocked = Boolean(submitting || roomAction || attempt?.pending);
   byId('create').disabled = blocked || !mode;
@@ -256,6 +312,31 @@ function renderMatchResult(room) {
   tableRows('match-player-rows', players.map((player) => columns.map(([key]) => player[key])));
 }
 
+function renderCharacterValidation(room) {
+  const validation = room?.characterValidation;
+  const info = {
+    PENDING: ['Aguardando', 'pending', 'A Lobbito está conferindo as habilidades dos jogadores.'],
+    VALID: ['Aprovado', 'ready', 'As habilidades conferidas seguem as regras da sala.'],
+    INVALID: ['Bloqueio detectado', 'error', 'Os jogadores indicados precisam ajustar as habilidades equipadas antes do início.'],
+    UNAVAILABLE: ['Indisponível', 'pending', 'A conferência ainda não foi concluída. Atualize a sala antes de tentar iniciar.'],
+  }[validation?.status];
+  byId('character-check').hidden = !info || room?.status !== 'WAITING_PLAYERS';
+  if (!info || room?.status !== 'WAITING_PLAYERS') return;
+  const [label, kind, message] = info;
+  const status = byId('character-check-status');
+  if (status.textContent !== label) status.textContent = label;
+  status.dataset.kind = kind;
+  byId('character-check-message').textContent = message;
+  const violations = validation.violations ?? [];
+  const list = byId('character-check-violations');
+  list.hidden = violations.length === 0;
+  list.replaceChildren(...violations.map(({ accountId, characterId, characterName, reason }) => {
+    const character = characterName || (characterId == null ? null : `ID ${characterId}`);
+    const violation = reason === 'UNKNOWN_CHARACTER' ? 'habilidade sem personagem identificado' : `habilidade bloqueada${character ? ` (${character})` : ''}`;
+    return element('li', `Jogador ${accountId} · ${violation}`);
+  }));
+}
+
 function showResult() {
   const room = displayedRoom();
   const result = byId('result');
@@ -263,6 +344,7 @@ function showResult() {
   const viewingAttempt = !currentRoom || room?.id === attempt?.room?.id;
   result.hidden = !room && !attempt?.pending && !attempt?.error;
   renderMatchResult(room);
+  renderCharacterValidation(room);
   if (result.hidden) return;
   const info = room
     ? statusInfo[room.status] ?? ['Status atualizado', '', 'Consulte a sala novamente para acompanhar a partida.']
@@ -301,6 +383,10 @@ function resetSession(message = '') {
   sessionVersion += 1;
   connected = false;
   catalog = defaultModes;
+  characters = [];
+  loadingModes = false;
+  blockedCharacters.clear();
+  byId('character-search').value = '';
   attempt = undefined;
   currentRoom = undefined;
   submitting = false;
@@ -316,6 +402,7 @@ function resetSession(message = '') {
   clearTimeout(pollTimer);
   renderConnection();
   renderModes();
+  renderCharacterPicker();
   renderHistory();
   renderInbox();
   showResult();
@@ -344,16 +431,25 @@ async function refreshAccount() {
 }
 
 async function loadModes() {
+  if (loadingModes || !connected) return;
   const version = sessionVersion;
+  loadingModes = true;
+  renderCharacterPicker();
   try {
     const data = await api('/modes');
     if (version !== sessionVersion) return;
     const supported = data.modes.filter((entry) => Object.hasOwn(formatDetails, entry.id));
     if (!supported.length) throw new Error('Catálogo vazio');
     catalog = supported;
+    characters = [...(data.characters ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
     renderModes();
   } catch (error) {
     if (!handleAuth(error, version)) notice('connection-message', 'Não foi possível atualizar o catálogo de mapas. O portal oferece o mapa padrão.', 'error');
+  } finally {
+    if (version === sessionVersion) {
+      loadingModes = false;
+      renderCharacterPicker();
+    }
   }
 }
 
@@ -421,6 +517,14 @@ function formPayload() {
   if (!isBr) {
     const rules = [...document.querySelectorAll('[data-rule]')].filter((input) => input.value !== '');
     if (rules.length) payload.settings = Object.fromEntries(rules.map((input) => [input.dataset.rule, input.value === 'true']));
+  }
+  if (blockedCharacters.size) {
+    const allowed = characters.filter(({ id }) => !blockedCharacters.has(id)).map(({ id }) => id);
+    if (!allowed.length) {
+      byId('character-rules').open = true;
+      throw new Error(minimumCharacterMessage);
+    }
+    payload.settings = { ...payload.settings, allowedCharacterIds: allowed.sort((a, b) => a - b) };
   }
 
   if (byId('use-teams').checked) {
@@ -560,6 +664,9 @@ async function manageRoom(action, id) {
     void loadHistory();
   } catch (error) {
     if (handleAuth(error, version)) return;
+    if (error.characterValidation && displayedRoom()?.id === id) {
+      applyRoom({ ...displayedRoom(), characterValidation: error.characterValidation }, false);
+    }
     notice('room-action-message', serverMessage(error), 'error');
   } finally {
     if (version === sessionVersion) {
@@ -711,6 +818,20 @@ roomForm.addEventListener('change', (event) => {
   renderSummary();
 });
 roomForm.addEventListener('input', renderSummary);
+byId('character-search').addEventListener('input', filterCharacters);
+byId('character-list').addEventListener('change', (event) => {
+  const checkbox = event.target;
+  const id = Number(checkbox.value);
+  if (checkbox.checked) blockedCharacters.add(id);
+  else blockedCharacters.delete(id);
+  renderCharacterSelection();
+});
+byId('clear-characters').addEventListener('click', () => {
+  blockedCharacters.clear();
+  for (const checkbox of byId('character-list').querySelectorAll('input:checked')) checkbox.checked = false;
+  renderCharacterSelection();
+});
+byId('retry-character-catalog').addEventListener('click', () => void loadModes());
 roomForm.addEventListener('invalid', (event) => {
   const group = event.target.closest('details');
   if (group) group.open = true;
@@ -822,6 +943,7 @@ function highlightNavigation() {
 window.addEventListener('hashchange', highlightNavigation);
 highlightNavigation();
 renderModes();
+renderCharacterPicker();
 byId('connect').disabled = true;
 try {
   const session = await api('/session');

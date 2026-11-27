@@ -1,8 +1,9 @@
 # FF-Salas-API
 
-Portal web em português para criar e gerenciar salas personalizadas de Free Fire pela API pública da Lobbito. Cada cliente se conecta com sua própria chave e usa a cota da sua conta. A Lobbito cria as salas e devolve os dados de acesso. [Conheça a Lobbito API](https://api.lobbito.com.br/) · [Documentação oficial](https://api.lobbito.com.br/docs)
+Portal web em português para organizar salas personalizadas de Free Fire pela API pública da Lobbito. Crie treinos e partidas com regras de habilidades, compartilhe o acesso e acompanhe os resultados no mesmo painel. Cada organizador usa a chave e a cota da sua conta. [Conheça a Lobbito API](https://api.lobbito.com.br/) · [Documentação oficial](https://api.lobbito.com.br/docs)
 
 - Crie salas de Contra Squad ou Battle Royale e compartilhe o ID e a senha com os jogadores.
+- Bloqueie habilidades ativas e passivas de personagens escolhidos e veja quem precisa ajustar as habilidades antes da partida.
 - Inicie partidas, cancele salas e acompanhe o histórico da sua conta.
 - Receba resultados e avisos de conferência por webhook quando o portal estiver hospedado em HTTPS.
 
@@ -22,10 +23,14 @@ Se baixou o ZIP, execute `npm start` na pasta extraída. O projeto usa os módul
 
 1. No [painel da Lobbito](https://api.lobbito.com.br/painel), gere uma chave da sua conta e use **Conexão API** no portal.
 2. Escolha Contra Squad (1x1 a 4x4) ou Battle Royale (Solo, Dupla ou Esquadrão), o mapa e, em Battle Royale, a capacidade. Deixe a senha em branco para que a API gere uma.
-3. Se precisar, abra **Opções avançadas** para definir prazo de entrada, referência, regras básicas de Contra Squad ou IDs dos participantes. Cadastre os jogadores para ativar o início automático.
+3. Em **Bloqueio de personagens**, busque e marque as habilidades que devem ficar fora da partida. O restante do catálogo fica liberado. Em **Opções avançadas**, ajuste as outras regras ou cadastre os jogadores para ativar o início automático.
 4. Clique em **Criar sala**. Quando a Lobbito confirmar a criação, copie o ID e a senha para compartilhar com os jogadores.
 
 O **Histórico de salas** consulta as salas da conta diretamente na API. Cada sessão acompanha um pedido de criação por vez até a confirmação. Se a conexão cair antes da confirmação, **Verificar pedido** reenvia a mesma configuração com o mesmo identificador de idempotência. Essa recuperação está disponível durante a mesma sessão do portal. Após expirar, desconectar ou reiniciar o servidor, consulte o histórico da conta antes de enviar outro pedido.
+
+## Bloqueio de personagens
+
+Disponível em Contra Squad e Battle Royale. A seleção usa o catálogo da Lobbito e vale para as habilidades ativas e passivas que os jogadores equiparem. A aparência do personagem no jogo continua livre. Ao usar a regra, deixe pelo menos um personagem liberado. A Lobbito confere as habilidades antes do início e o portal mostra os IDs dos jogadores que precisam ajustar a seleção. [Regras de criação e início da Lobbito](https://api.lobbito.com.br/docs#criar-sala)
 
 ## Iniciar, cancelar e acompanhar
 

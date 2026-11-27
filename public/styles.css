@@ -104,6 +104,17 @@ legend, .field > label { font-size: .88rem; font-weight: 640; }
 .advanced[open] summary::after { content: "−"; }
 .advanced-body { display: grid; gap: 17px; padding: 5px 0 15px; }
 .advanced-body .mode-section { margin: 0; }
+.character-rules { border-color: #3a527b; background: #17243b; border: 1px solid #3a527b; border-radius: 8px; padding-inline: 12px; }
+.character-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-block: 6px; }
+.character-rules .advanced-body, .character-picker { gap: 9px; }
+.character-picker { display: grid; }
+.character-tools { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.character-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(115px, 1fr)); gap: 6px; max-height: 245px; overflow: auto; padding: 3px; }
+.character-choice { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 8px; border: 1px solid #3a4b68; border-radius: 6px; background: #121c2c; color: #dfe8fa; font-size: .84rem; cursor: pointer; overflow-wrap: anywhere; }
+.character-choice:has(input:checked) { background: #3a283f; border-color: #bc759e; }
+.character-choice input { flex: none; margin: 0; width: 16px; height: 16px; accent-color: #bb80b8; }
+.character-violations { margin: 8px 0 0; padding-left: 18px; color: #ffd8dc; font-size: .82rem; line-height: 1.5; overflow-wrap: anywhere; }
+.room-advanced { border-top: 0; margin-top: 3px; }
 .team-fields { margin-top: 12px; display: grid; gap: 12px; }
 .check { display: flex; align-items: flex-start; gap: 8px; color: #d5def0; font-size: .87rem; line-height: 1.4; }
 .check input { margin: 2px 0 0; width: 17px; height: 17px; accent-color: #6991fb; flex: none; }
