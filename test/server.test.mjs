@@ -264,6 +264,7 @@ test('expõe o catálogo de personagens e encaminha a restrição em Contra Squa
   const { cookie } = await login();
   const modes = await request('/api/modes', { cookie });
   assert.deepEqual(modes.data.characters, [{ id: 101, name: 'Personagem A' }, { id: 202, name: 'Personagem B' }]);
+  assert.deepEqual(modes.data.petCatalogs, { cs: { pets: [], petSkills: [] }, br: { pets: [], petSkills: [] } });
   assert.doesNotMatch(JSON.stringify(modes.data), /DADO_INTERNO|Duplicado|Ocultar/);
 
   const create = (body) => request('/api/rooms', { method: 'POST', cookie, body });
@@ -279,6 +280,49 @@ test('expõe o catálogo de personagens e encaminha a restrição em Contra Squa
   assert.equal((await create({ ...br, settings: { ...br.settings, headshotsOnly: true } })).status, 400);
   assert.equal((await create({ mode: '2x2', settings: { allowedPetIds: [1] } })).status, 400);
   assert.equal(submissions.length, 3);
+});
+
+test('oferece catálogos de pets por modo e encaminha regras de pet e habilidade separadamente', async (t) => {
+  const submissions = [];
+  const { request, login } = await fixture(t, (url, input) => {
+    if (url.pathname === '/v1/modes') return api({
+      settings: {
+        pets: [{ id: 101, name: 'Pet de CS', raw: 'DADO_INTERNO' }, { id: 101, name: 'Duplicado' }],
+        petSkills: [{ id: 201, name: 'Habilidade de CS', raw: 'DADO_INTERNO' }],
+      },
+      settingsByGameMode: {
+        battle_royale: {
+          pets: [{ id: 102, name: 'Pet de BR' }, { id: 'inválido', name: 'Ocultar' }],
+        },
+      },
+    });
+    assert.equal(url.pathname, '/v1/rooms');
+    submissions.push(JSON.parse(input.body));
+    return api(readyRoom, 201);
+  });
+  const { cookie } = await login();
+  const modes = await request('/api/modes', { cookie });
+  assert.equal(modes.status, 200);
+  assert.deepEqual(modes.data.petCatalogs, {
+    cs: { pets: [{ id: 101, name: 'Pet de CS' }], petSkills: [{ id: 201, name: 'Habilidade de CS' }] },
+    br: { pets: [{ id: 102, name: 'Pet de BR' }], petSkills: [] },
+  });
+  assert.doesNotMatch(JSON.stringify(modes.data), /DADO_INTERNO|Duplicado|Ocultar/);
+
+  const create = (body) => request('/api/rooms', { method: 'POST', cookie, body });
+  const cs = { mode: '1x1', settings: { blockedPetIds: [101], blockedPetSkillIds: [201], headshotsOnly: true } };
+  const br = { mode: 'br-squad', maxPlayers: 12, settings: { blockedPetIds: [102], blockedPetSkillIds: [202] } };
+  const skillOnly = { mode: 'br-duo', maxPlayers: 8, settings: { blockedPetSkillIds: [202] } };
+  const unrestricted = { mode: '2x2', settings: { blockedPetIds: [], blockedPetSkillIds: [] } };
+  for (const payload of [cs, br, skillOnly, unrestricted]) assert.equal((await create(payload)).status, 201);
+  assert.deepEqual(submissions, [cs, br, skillOnly, unrestricted]);
+
+  for (const setting of ['blockedPetIds', 'blockedPetSkillIds']) {
+    for (const invalid of [null, [101, 101], ['101'], [1.5], [Number.MAX_SAFE_INTEGER + 1]]) {
+      assert.equal((await create({ mode: '2x2', settings: { [setting]: invalid } })).status, 400);
+    }
+  }
+  assert.equal(submissions.length, 4);
 });
 
 test('consulta a conferência da própria sala e sanitiza os detalhes de bloqueios no início', async (t) => {
@@ -334,6 +378,37 @@ test('consulta a conferência da própria sala e sanitiza os detalhes de bloquei
   assert.equal(cancel.status, 409);
   assert.equal(cancel.data.error.code, 'invalid_state');
   assert.equal(cancel.data.error.details, undefined);
+});
+
+test('sanitiza conflitos de pet equipado e de habilidade de pet na conferência e no início', async (t) => {
+  const checkedAt = '2026-11-26T22:30:00.000Z';
+  const characterValidation = { status: 'INVALID', checkedAt, violations: [
+    { accountId: '00123456', petId: 101, petName: 'Pet equipado', petSkillName: 'DADO_INTERNO', reason: 'PET_NOT_ALLOWED' },
+    { accountId: '00123456', petSkillId: 201, petSkillName: 'Habilidade equipada', petName: 'DADO_INTERNO', reason: 'PET_SKILL_NOT_ALLOWED' },
+    { accountId: 'DADO_INTERNO', petSkillId: 202, reason: 'PET_SKILL_NOT_ALLOWED' },
+  ] };
+  const expected = { status: 'INVALID', checkedAt, violations: [
+    { accountId: '00123456', petId: 101, petName: 'Pet equipado', reason: 'PET_NOT_ALLOWED' },
+    { accountId: '00123456', petSkillId: 201, petSkillName: 'Habilidade equipada', reason: 'PET_SKILL_NOT_ALLOWED' },
+  ] };
+  const room = { ...readyRoom, characterValidation };
+  const { request, login } = await fixture(t, (url) => {
+    if (url.pathname === '/v1/rooms') return api({ data: [room] });
+    if (url.pathname.endsWith('/start')) return api({ error: {
+      code: 'pets_not_allowed', message: 'DADO_INTERNO', details: { characterValidation, raw: 'DADO_INTERNO' },
+    } }, 409);
+    return api(room);
+  });
+  const { cookie } = await login();
+  const path = `/api/rooms/${room.id}`;
+  assert.deepEqual((await request(path, { cookie })).data.characterValidation, expected);
+  assert.equal(Object.hasOwn((await request('/api/rooms', { cookie })).data.data[0], 'characterValidation'), false);
+
+  const denied = await request(`${path}/start`, { method: 'POST', cookie });
+  assert.equal(denied.status, 409);
+  assert.equal(denied.data.error.code, 'pets_not_allowed');
+  assert.deepEqual(denied.data.error.details, { characterValidation: expected });
+  assert.doesNotMatch(JSON.stringify(denied.data), /DADO_INTERNO/);
 });
 
 test('inicia ou cancela na Lobbito com a chave da sessão e consulta a sala quando necessário', async (t) => {

@@ -40,9 +40,10 @@ const errorMessages = {
   idempotency_conflict: 'A Lobbito detectou um conflito neste pedido de criação.',
 };
 
-const characterStartErrors = {
-  characters_not_allowed: 'Há habilidades incompatíveis com as regras da sala. Peça aos jogadores indicados para trocar as habilidades antes de iniciar.',
-  character_validation_unavailable: 'A Lobbito ainda não conseguiu conferir as habilidades equipadas. Verifique a sala e tente iniciar novamente quando a conferência estiver disponível.',
+const restrictionStartErrors = {
+  characters_not_allowed: 'Há habilidades incompatíveis com as regras da sala. Peça aos jogadores indicados para ajustar a seleção antes de iniciar.',
+  pets_not_allowed: 'Há pets ou habilidades de pet incompatíveis com as regras da sala. Peça aos jogadores indicados para ajustar a seleção antes de iniciar.',
+  character_validation_unavailable: 'A Lobbito ainda não conseguiu conferir as regras de personagens e pets. Verifique a sala e tente iniciar novamente quando a conferência estiver disponível.',
 };
 
 function actionUnconfirmed() {
@@ -59,9 +60,9 @@ function upstreamError(response, data, creating, action) {
   };
 
   if (action && (response.status >= 500 || response.status === 408)) return actionUnconfirmed();
-  if (action === 'start' && response.status === 409 && typeof code === 'string' && Object.hasOwn(characterStartErrors, code)) {
+  if (action === 'start' && response.status === 409 && typeof code === 'string' && Object.hasOwn(restrictionStartErrors, code)) {
     const characterValidation = publicCharacterValidation(data.error.details?.characterValidation);
-    return new HttpError(409, code, characterStartErrors[code], {
+    return new HttpError(409, code, restrictionStartErrors[code], {
       ...options, details: characterValidation ? { characterValidation } : undefined,
     });
   }

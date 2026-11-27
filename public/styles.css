@@ -113,6 +113,7 @@ legend, .field > label { font-size: .88rem; font-weight: 640; }
 .character-choice { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 8px; border: 1px solid #3a4b68; border-radius: 6px; background: #121c2c; color: #dfe8fa; font-size: .84rem; cursor: pointer; overflow-wrap: anywhere; }
 .character-choice:has(input:checked) { background: #3a283f; border-color: #bc759e; }
 .character-choice input { flex: none; margin: 0; width: 16px; height: 16px; accent-color: #bb80b8; }
+.pet-segments { justify-self: start; }
 .character-violations { margin: 8px 0 0; padding-left: 18px; color: #ffd8dc; font-size: .82rem; line-height: 1.5; overflow-wrap: anywhere; }
 .room-advanced { border-top: 0; margin-top: 3px; }
 .team-fields { margin-top: 12px; display: grid; gap: 12px; }

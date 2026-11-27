@@ -24,8 +24,14 @@ const minimumCharacterMessage = 'Deixe pelo menos um personagem liberado para cr
 
 let catalog = defaultModes;
 let characters = [];
+let petCatalogs = {};
+let petRule = 'pets';
 let loadingModes = false;
 const blockedCharacters = new Set();
+const petSelections = {
+  cs: { pets: new Set(), petSkills: new Set() },
+  br: { pets: new Set(), petSkills: new Set() },
+};
 let family = 'cs';
 let mode = defaultModes[1];
 let connected = false;
@@ -153,6 +159,7 @@ function renderModeFields() {
     replaceOptions(capacity, values.map((value) => [value, `${value} jogadores`]));
     if (!values.includes(previous)) capacity.value = max;
   }
+  renderPetPicker();
   renderSummary();
 }
 
@@ -160,14 +167,31 @@ function searchText(value) {
   return value.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
 }
 
-function filterCharacters() {
-  const query = searchText(byId('character-search').value);
+function filterChoices(search, list, empty) {
+  const query = searchText(byId(search).value);
   let visible = 0;
-  for (const choice of byId('character-list').children) {
+  for (const choice of byId(list).children) {
     choice.hidden = !choice.dataset.search.includes(query);
     if (!choice.hidden) visible += 1;
   }
-  byId('no-character-matches').hidden = visible > 0;
+  byId(empty).hidden = visible > 0;
+}
+
+function choiceList(list, items, selected) {
+  byId(list).replaceChildren(...items.map(({ id, name }) => {
+    const choice = element('label', undefined, 'character-choice');
+    choice.dataset.search = searchText(`${name} ${id}`);
+    const input = element('input');
+    input.type = 'checkbox';
+    input.value = id;
+    input.checked = selected.has(id);
+    choice.append(input, element('span', name));
+    return choice;
+  }));
+}
+
+function filterCharacters() {
+  filterChoices('character-search', 'character-list', 'no-character-matches');
 }
 
 function renderCharacterSelection() {
@@ -192,18 +216,48 @@ function renderCharacterPicker() {
     : loadingModes ? 'Carregando personagens…'
       : !characters.length ? 'A Lobbito não disponibilizou o catálogo de personagens nesta sessão.' : '';
   notice('character-catalog-message', message);
-  byId('character-list').replaceChildren(...characters.map(({ id, name }) => {
-    const choice = element('label', undefined, 'character-choice');
-    choice.dataset.search = searchText(`${name} ${id}`);
-    const input = element('input');
-    input.type = 'checkbox';
-    input.value = id;
-    input.checked = blockedCharacters.has(id);
-    choice.append(input, element('span', name));
-    return choice;
-  }));
+  choiceList('character-list', characters, blockedCharacters);
   filterCharacters();
   renderCharacterSelection();
+}
+
+function filterPets() {
+  filterChoices('pet-search', 'pet-list', 'no-pet-matches');
+}
+
+function renderPetSelection() {
+  const selection = petSelections[family];
+  const count = selection[petRule].size;
+  const total = selection.pets.size + selection.petSkills.size;
+  const badge = byId('pet-badge');
+  badge.hidden = total === 0;
+  badge.textContent = total === 1 ? '1 bloqueio' : `${total} bloqueios`;
+  byId('pet-count').textContent = count === 0 ? 'Sem bloqueios' : count === 1 ? '1 selecionado' : `${count} selecionados`;
+  byId('clear-pet-selection').disabled = count === 0;
+  renderSummary();
+}
+
+function renderPetPicker() {
+  const group = petCatalogs[family];
+  const visual = Boolean(group?.pets?.length);
+  const skills = Boolean(group?.petSkills?.length);
+  if (!group?.[petRule]?.length) petRule = skills ? 'petSkills' : 'pets';
+  const show = connected && !loadingModes && (visual || skills);
+  byId('pet-picker').hidden = !show;
+  byId('pet-rule-types').hidden = !(visual && skills);
+  for (const input of byId('pet-rule-types').querySelectorAll('input')) input.checked = petRule === input.value;
+  const message = !connected ? 'Conecte sua chave da Lobbito para carregar o catálogo.'
+    : loadingModes ? 'Carregando o catálogo de pets…'
+      : !show ? 'A Lobbito não disponibilizou regras de pets para este modo.' : '';
+  notice('pet-catalog-message', message);
+  byId('pet-rule-hint').textContent = petRule === 'petSkills'
+    ? 'Marque as habilidades que serão bloqueadas. O visual do pet continua livre nesta regra.'
+    : 'Marque os visuais que serão bloqueados. A regra usa o pet equipado no visual.';
+  byId('pet-search-label').textContent = petRule === 'petSkills' ? 'Buscar habilidade de pet' : 'Buscar pet';
+  byId('pet-list').setAttribute('aria-label', petRule === 'petSkills' ? 'Habilidades de pet para bloquear' : 'Visuais de pet para bloquear');
+  choiceList('pet-list', group?.[petRule] ?? [], petSelections[family][petRule]);
+  filterPets();
+  renderPetSelection();
 }
 
 function renderSummary() {
@@ -218,6 +272,8 @@ function renderSummary() {
     ['Prazo de entrada', byId('deadline').validity.valid ? `${byId('deadline').value} min` : null],
     ['Senha', byId('room-password').value ? 'Personalizada' : 'Automática'],
     ...(blockedCharacters.size ? [['Personagens bloqueados', blockedCharacters.size]] : []),
+    ...(petSelections[family].pets.size ? [['Visuais de pet bloqueados', petSelections[family].pets.size]] : []),
+    ...(petSelections[family].petSkills.size ? [['Habilidades de pet bloqueadas', petSelections[family].petSkills.size]] : []),
   ]);
   const blocked = Boolean(submitting || roomAction || attempt?.pending);
   byId('create').disabled = blocked || !mode;
@@ -315,9 +371,9 @@ function renderMatchResult(room) {
 function renderCharacterValidation(room) {
   const validation = room?.characterValidation;
   const info = {
-    PENDING: ['Aguardando', 'pending', 'A Lobbito está conferindo as habilidades dos jogadores.'],
-    VALID: ['Aprovado', 'ready', 'As habilidades conferidas seguem as regras da sala.'],
-    INVALID: ['Bloqueio detectado', 'error', 'Os jogadores indicados precisam ajustar as habilidades equipadas antes do início.'],
+    PENDING: ['Aguardando', 'pending', 'A Lobbito está conferindo as escolhas dos jogadores.'],
+    VALID: ['Aprovado', 'ready', 'Os jogadores conferidos seguem as regras da sala.'],
+    INVALID: ['Bloqueio detectado', 'error', 'Os jogadores indicados precisam ajustar as escolhas antes do início.'],
     UNAVAILABLE: ['Indisponível', 'pending', 'A conferência ainda não foi concluída. Atualize a sala antes de tentar iniciar.'],
   }[validation?.status];
   byId('character-check').hidden = !info || room?.status !== 'WAITING_PLAYERS';
@@ -330,10 +386,18 @@ function renderCharacterValidation(room) {
   const violations = validation.violations ?? [];
   const list = byId('character-check-violations');
   list.hidden = violations.length === 0;
-  list.replaceChildren(...violations.map(({ accountId, characterId, characterName, reason }) => {
-    const character = characterName || (characterId == null ? null : `ID ${characterId}`);
-    const violation = reason === 'UNKNOWN_CHARACTER' ? 'habilidade sem personagem identificado' : `habilidade bloqueada${character ? ` (${character})` : ''}`;
-    return element('li', `Jogador ${accountId} · ${violation}`);
+  list.replaceChildren(...violations.map((violation) => {
+    const { accountId, reason } = violation;
+    const names = {
+      NOT_ALLOWED: ['habilidade de personagem bloqueada', violation.characterName, violation.characterId],
+      CHARACTER_BLOCKED: ['habilidade de personagem bloqueada', violation.characterName, violation.characterId],
+      UNKNOWN_CHARACTER: ['habilidade sem personagem identificado'],
+      PET_NOT_ALLOWED: ['visual de pet bloqueado', violation.petName, violation.petId],
+      PET_SKILL_NOT_ALLOWED: ['habilidade de pet bloqueada', violation.petSkillName, violation.petSkillId],
+    };
+    const [message, name, id] = names[reason] ?? ['regra da sala não atendida'];
+    const item = name || (id == null ? '' : `ID ${id}`);
+    return element('li', `Jogador ${accountId} · ${message}${item ? ` (${item})` : ''}`);
   }));
 }
 
@@ -384,6 +448,13 @@ function resetSession(message = '') {
   connected = false;
   catalog = defaultModes;
   characters = [];
+  petCatalogs = {};
+  petRule = 'pets';
+  for (const selection of Object.values(petSelections)) {
+    selection.pets.clear();
+    selection.petSkills.clear();
+  }
+  byId('pet-search').value = '';
   loadingModes = false;
   blockedCharacters.clear();
   byId('character-search').value = '';
@@ -435,6 +506,7 @@ async function loadModes() {
   const version = sessionVersion;
   loadingModes = true;
   renderCharacterPicker();
+  renderPetPicker();
   try {
     const data = await api('/modes');
     if (version !== sessionVersion) return;
@@ -442,6 +514,7 @@ async function loadModes() {
     if (!supported.length) throw new Error('Catálogo vazio');
     catalog = supported;
     characters = [...(data.characters ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    petCatalogs = data.petCatalogs ?? {};
     renderModes();
   } catch (error) {
     if (!handleAuth(error, version)) notice('connection-message', 'Não foi possível atualizar o catálogo de mapas. O portal oferece o mapa padrão.', 'error');
@@ -449,6 +522,7 @@ async function loadModes() {
     if (version === sessionVersion) {
       loadingModes = false;
       renderCharacterPicker();
+      renderPetPicker();
     }
   }
 }
@@ -525,6 +599,15 @@ function formPayload() {
       throw new Error(minimumCharacterMessage);
     }
     payload.settings = { ...payload.settings, allowedCharacterIds: allowed.sort((a, b) => a - b) };
+  }
+  const selection = petSelections[family];
+  if (selection.pets.size) {
+    payload.settings ??= {};
+    payload.settings.blockedPetIds = [...selection.pets].sort((a, b) => a - b);
+  }
+  if (selection.petSkills.size) {
+    payload.settings ??= {};
+    payload.settings.blockedPetSkillIds = [...selection.petSkills].sort((a, b) => a - b);
   }
 
   if (byId('use-teams').checked) {
@@ -832,6 +915,25 @@ byId('clear-characters').addEventListener('click', () => {
   renderCharacterSelection();
 });
 byId('retry-character-catalog').addEventListener('click', () => void loadModes());
+byId('pet-search').addEventListener('input', filterPets);
+byId('pet-rule-types').addEventListener('change', (event) => {
+  petRule = event.target.value;
+  byId('pet-search').value = '';
+  renderPetPicker();
+});
+byId('pet-list').addEventListener('change', (event) => {
+  const input = event.target;
+  const selected = petSelections[family][petRule];
+  const id = Number(input.value);
+  if (input.checked) selected.add(id);
+  else selected.delete(id);
+  renderPetSelection();
+});
+byId('clear-pet-selection').addEventListener('click', () => {
+  petSelections[family][petRule].clear();
+  for (const input of byId('pet-list').querySelectorAll('input:checked')) input.checked = false;
+  renderPetSelection();
+});
 roomForm.addEventListener('invalid', (event) => {
   const group = event.target.closest('details');
   if (group) group.open = true;

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Crie salas de Free Fire, bloqueie habilidades de personagens e acompanhe partidas pela API da Lobbito.">
+  <meta name="description" content="Crie salas de Free Fire, configure regras de personagens e pets e acompanhe partidas pela API da Lobbito.">
   <title>Portal de Salas · Lobbito</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="stylesheet" href="/styles.css">
@@ -38,7 +38,7 @@
           <div class="hero-copy">
             <p class="eyebrow">SALAS DE FREE FIRE</p>
             <h1>Crie sua sala<span>.</span></h1>
-            <p>Configure a partida, bloqueie habilidades e compartilhe o acesso com os jogadores.</p>
+            <p>Configure regras de personagens e pets, gere a sala e compartilhe o acesso com os jogadores.</p>
           </div>
         </header>
 
@@ -91,6 +91,30 @@
                     </div>
                     <div class="character-list" id="character-list" role="group" aria-label="Personagens para bloquear"></div>
                     <p class="helper" id="no-character-matches" hidden>Nenhum personagem encontrado.</p>
+                  </div>
+                </div>
+              </details>
+
+              <details class="advanced character-rules" id="pet-rules">
+                <summary><span class="character-summary">Regras de pets <span id="pet-badge" class="pill" hidden></span></span></summary>
+                <div class="advanced-body">
+                  <p class="notice" id="pet-catalog-message">Conecte sua chave da Lobbito para carregar o catálogo.</p>
+                  <div id="pet-picker" class="character-picker" hidden>
+                    <div class="segments pet-segments" id="pet-rule-types" role="group" aria-label="Tipo de bloqueio de pet" hidden>
+                      <label><input type="radio" name="pet-rule-type" value="pets" checked><span>Visual do pet</span></label>
+                      <label><input type="radio" name="pet-rule-type" value="petSkills"><span>Habilidade equipada</span></label>
+                    </div>
+                    <p class="helper" id="pet-rule-hint"></p>
+                    <div class="field">
+                      <label for="pet-search" id="pet-search-label">Buscar pet</label>
+                      <input id="pet-search" type="search" autocomplete="off" placeholder="Digite o nome">
+                    </div>
+                    <div class="character-tools">
+                      <p class="helper" id="pet-count" role="status">Sem bloqueios</p>
+                      <button type="button" class="button secondary" id="clear-pet-selection" disabled>Limpar seleção</button>
+                    </div>
+                    <div class="character-list" id="pet-list" role="group" aria-label="Pets para bloquear"></div>
+                    <p class="helper" id="no-pet-matches" hidden>Nenhum item encontrado.</p>
                   </div>
                 </div>
               </details>
@@ -159,7 +183,7 @@
                 <dl class="summary-list" id="result-details"></dl>
                 <section class="match-result" id="character-check" aria-labelledby="character-check-title" hidden>
                   <div class="result-head">
-                    <h3 id="character-check-title">Conferência de habilidades</h3>
+                    <h3 id="character-check-title">Conferência de habilidades e pets</h3>
                     <span class="pill" id="character-check-status" aria-live="polite"></span>
                   </div>
                   <p id="character-check-message"></p>
