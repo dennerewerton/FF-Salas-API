@@ -653,3 +653,13 @@ test('só encerra o pedido local quando a Arena bloqueia o protocolo sem sala', 
   assert.deepEqual((await close()).data, { closed: true });
   assert.equal(attempts.get(accountData.id), undefined);
 });
+
+
+test('health identifica os arquivos desta versão sem exigir uma sessão', async (t) => {
+  const portal = await fixture(t, () => { throw new Error('health called upstream'); });
+  const { status, data } = await portal.request('/health');
+  assert.equal(status, 200);
+  assert.equal(data.status, 'ok');
+  assert.match(data.fingerprint, /^[a-f0-9]{64}$/);
+  assert.ok(Number.isFinite(Date.parse(data.startedAt)));
+});

@@ -69,7 +69,7 @@ Na ShardCloud, conecte o repositório GitHub. O manifesto `.shardcloud` inicia o
 | `PORTAL_ORIGIN` | Origem pública exata, por exemplo `https://salas.example.com`. HTTPS ativa o atributo `Secure` no cookie. |
 | `SECURE_COOKIES` | Defina `true` em produção para exigir cookie seguro. |
 | `LOBBITO_WEBHOOK_SECRETS` | Objeto JSON com os IDs `acct_…` e seus segredos `whsec_…`. Configure quando quiser receber webhooks. |
-| `RELEASE_SHA` | SHA completo da versão em pacotes sem metadados do Git. A rota `/health` expõe o commit e a hora de início da instância. |
+| `RELEASE_SHA` | SHA completo da versão em pacotes sem metadados do Git. A rota `/health` expõe o commit disponível, a impressão SHA-256 do código e a hora de início da instância. |
 | `LOBBITO_ATTEMPTS_DB` | Banco SQLite de protocolos pendentes. O padrão é `data/lobbito-attempts.sqlite`. Use um volume persistente. |
 | `LOBBITO_WEBHOOK_DB` | Caminho para o banco SQLite de resultados. O padrão é `data/lobbito-results.sqlite`. Use um caminho em volume persistente na hospedagem. |
 
