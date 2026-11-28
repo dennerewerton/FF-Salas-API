@@ -1,0 +1,5 @@
+DISPLAY_NAME=FF Salas Portal
+MAIN=server.mjs
+LANGUAGE=node
+VERSION=24.15.0
+MEMORY=512

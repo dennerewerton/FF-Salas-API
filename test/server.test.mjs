@@ -596,3 +596,60 @@ test('recebe webhook sem sessão e libera os resultados apenas à conta vinculad
   assert.equal(Object.hasOwn(revoked.data, 'data'), false);
   assert.deepEqual((await request('/api/session', { cookie: primary.cookie })).data, { connected: false });
 });
+
+test('recupera o protocolo em outro processo sem guardar chave, configuração ou senha', async (t) => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openAttempts } = await import('../lib/attempts.mjs');
+  const directory = mkdtempSync(join(tmpdir(), 'portal-attempt-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const database = join(directory, 'attempts.sqlite');
+  let protocol;
+  const firstStore = openAttempts(database);
+  const first = await fixture(t, (url, input) => {
+    assert.equal(url.pathname, '/v1/rooms');
+    protocol = input.headers['Idempotency-Key'];
+    throw new Error('synthetic interruption');
+  }, { attempts: firstStore });
+  const session = await first.login();
+  const request = { method: 'POST', cookie: session.cookie, body: { mode: '2x2', password: '123456' } };
+  assert.equal((await first.request('/api/rooms', request)).status, 502);
+  assert.deepEqual({ ...firstStore.get(accountData.id) }, { key: protocol, roomId: null });
+
+  const second = await fixture(t, (url, input) => {
+    assert.equal(url.pathname, `/v1/room-requests/${protocol}`);
+    assert.equal(input.method, 'GET');
+    return api(readyRoom);
+  }, { attempts: openAttempts(database) });
+  assert.equal((await second.login(testKeyBeta)).data.attempt, undefined);
+  const reconnected = await second.login();
+  assert.equal(reconnected.data.attempt.protocol, protocol);
+  const status = await second.request('/api/retry', { method: 'POST', cookie: reconnected.cookie });
+  assert.equal(status.data.room.id, readyRoom.id);
+  assert.equal(firstStore.get(accountData.id), undefined);
+});
+
+test('só encerra o pedido local quando a Arena bloqueia o protocolo sem sala', async (t) => {
+  const { openAttempts } = await import('../lib/attempts.mjs');
+  const attempts = openAttempts(), protocol = 'd285d7b0-c120-46d0-84b1-cf9571d44da1';
+  attempts.begin(accountData.id, protocol);
+  let canClose = false;
+  const portal = await fixture(t, (url, input) => {
+    assert.equal(url.pathname, `/v1/room-requests/${protocol}`);
+    if (input.method === 'GET') return api({ error: { code: 'not_found' } }, 404);
+    assert.equal(input.method, 'DELETE');
+    return canClose ? api({ ok: true }) : api({ error: { code: 'request_received' } }, 409);
+  }, { attempts });
+  const { cookie } = await portal.login();
+  const verify = () => portal.request('/api/retry', { method: 'POST', cookie });
+  const close = () => portal.request('/api/retry', { method: 'DELETE', cookie });
+  assert.equal((await verify()).data.error.code, 'request_unconfirmed');
+  assert.equal((await portal.request('/api/session', { cookie })).data.attempt.canClose, true);
+  assert.equal((await close()).data.error.code, 'request_received');
+  assert.equal(attempts.get(accountData.id).key, protocol);
+  canClose = true;
+  await verify();
+  assert.deepEqual((await close()).data, { closed: true });
+  assert.equal(attempts.get(accountData.id), undefined);
+});

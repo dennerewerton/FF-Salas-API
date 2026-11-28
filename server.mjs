@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { HttpError, ROOM_ID, pendingRoom, publicAccount, publicCharacterValidation, publicModes, publicRoom, roomRequest } from './lib/contract.mjs';
 import { openWebhooks } from './lib/webhooks.mjs';
+import { openAttempts } from './lib/attempts.mjs';
+import { releaseInfo } from './lib/release_info.mjs';
 
 const API_ORIGIN = 'https://api.lobbito.com.br';
 const COOKIE = 'lobbito_portal_session';
@@ -20,6 +22,7 @@ const assets = new Map([
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/demo.js', ['demo.js', 'text/javascript; charset=utf-8']],
   ['/favicon.ico', ['favicon.ico', 'image/vnd.microsoft.icon']],
   ['/arena.jpg', ['arena.jpg', 'image/jpeg']],
 ]);
@@ -37,6 +40,8 @@ const errorMessages = {
   concurrency_limit: 'Sua conta já atingiu o limite de salas simultâneas.',
   capacity_unavailable: 'A Lobbito está temporariamente sem capacidade para criar salas. Tente novamente em instantes.',
   creation_failed: 'A Lobbito confirmou que a sala não pôde ser criada. Você pode enviar um novo pedido.',
+  request_received: 'A Arena encontrou uma sala para o protocolo. Clique em Verificar pedido para acompanhar.',
+  request_abandoned: 'A Arena confirmou que o pedido anterior foi encerrado sem criar sala.',
   idempotency_conflict: 'A Lobbito detectou um conflito neste pedido de criação.',
 };
 
@@ -85,7 +90,7 @@ function invalidResponse(creating = false) {
     : 'A Lobbito devolveu uma resposta inesperada. Tente novamente em instantes.', { uncertain: creating });
 }
 
-async function lobbito(fetchApi, key, path, { attempt, action = false } = {}) {
+async function lobbito(fetchApi, key, path, { attempt, action = false, method = attempt || action ? 'POST' : 'GET' } = {}) {
   const creating = Boolean(attempt);
   const headers = { Accept: 'application/json', Authorization: `Bearer ${key}` };
   if (attempt) {
@@ -98,7 +103,7 @@ async function lobbito(fetchApi, key, path, { attempt, action = false } = {}) {
   try {
     response = await fetchApi(`${API_ORIGIN}${path}`, {
       headers,
-      method: creating || action ? 'POST' : 'GET',
+      method,
       body: attempt ? JSON.stringify(attempt.payload) : undefined,
       signal: AbortSignal.timeout(creating ? 50_000 : action ? 35_000 : 12_000),
       redirect: 'error',
@@ -184,7 +189,8 @@ function securityHeaders(response) {
 
 function attemptView(attempt) {
   if (!attempt) return undefined;
-  return { pending: attempt.pending, inFlight: attempt.inFlight, room: attempt.room, error: attempt.error };
+  return { pending: attempt.pending, inFlight: attempt.inFlight, room: attempt.room, error: attempt.error,
+    protocol: attempt.pending ? attempt.key : undefined, canClose: attempt.canClose || undefined };
 }
 
 function sessionView(session) {
@@ -195,12 +201,13 @@ function assignRoom(attempt, room) {
   attempt.room = room;
   attempt.pending = pendingRoom(room);
   attempt.error = undefined;
+  attempt.canClose = false;
   if (!attempt.pending) attempt.payload = undefined;
 }
 
 function rememberRoom(session, room) {
   const attempt = session.attempt;
-  if (attempt?.room?.id === room.id && (attempt.pending || !pendingRoom(room))) assignRoom(attempt, room);
+  if ((attempt?.room?.id ?? attempt?.roomId) === room.id && (attempt.pending || !pendingRoom(room))) assignRoom(attempt, room);
 }
 
 function mergeReceivedResult(room, webhookRoom) {
@@ -256,7 +263,7 @@ async function roomAction(fetchApi, session, id, action) {
   return { room, status: status === 202 ? 202 : 200 };
 }
 
-async function sendAttempt(fetchApi, session, attempt, response) {
+async function sendAttempt(fetchApi, session, attempt, response, syncAttempt) {
   const wasUncertain = attempt.pending && !attempt.room && Boolean(attempt.error);
   attempt.inFlight = true;
   try {
@@ -264,21 +271,35 @@ async function sendAttempt(fetchApi, session, attempt, response) {
     const room = publicRoom(data?.room ?? data, { includeCharacterValidation: true });
     if (!room) throw invalidResponse(true);
     assignRoom(attempt, room);
+    syncAttempt(session, attempt);
     json(response, status, { room });
   } catch (error) {
     if (!(error instanceof HttpError)) throw error;
     if (error.room) assignRoom(attempt, error.room);
-    attempt.pending = !error.room && (Boolean(error.uncertain) || (wasUncertain && error.code !== 'creation_failed'));
+    attempt.pending = !error.room && (Boolean(error.uncertain) || (wasUncertain && !['creation_failed', 'request_abandoned'].includes(error.code)));
     attempt.error = error.toJSON();
     if (!attempt.pending) attempt.payload = undefined;
+    syncAttempt(session, attempt);
     throw error;
   } finally {
     attempt.inFlight = false;
   }
 }
 
-export function createServer({ fetchApi = globalThis.fetch, secureCookies = false, allowedOrigin, webhooks } = {}) {
+export function createServer({ fetchApi = globalThis.fetch, secureCookies = false, allowedOrigin, webhooks,
+  attempts = openAttempts() } = {}) {
   const sessions = new Map();
+  function restoreAttempt(session) {
+    if (!session?.accountId) return;
+    const saved = attempts.get(session.accountId);
+    if (saved && saved.key !== session.attempt?.key) session.attempt = { ...saved, pending: true };
+    if (saved?.roomId && !session.attempt.room) session.attempt.roomId = saved.roomId;
+    if (!saved && session.attempt?.pending && !session.attempt.inFlight) session.attempt = undefined;
+  }
+  function syncAttempt(session, attempt) {
+    if (!attempt.pending) attempts.finish(session.accountId, attempt.key);
+    else if (attempt.room?.id) attempts.link(session.accountId, attempt.key, attempt.room.id);
+  }
   function withReceivedResult(session, room) {
     return mergeReceivedResult(room, webhooks?.getRoom(session.accountId, room.id));
   }
@@ -297,6 +318,8 @@ export function createServer({ fetchApi = globalThis.fetch, secureCookies = fals
       const url = new URL(request.url, 'http://portal.local');
       const { pathname } = url;
       const { method } = request;
+
+      if (method === 'GET' && pathname === '/health') return json(response, 200, { status: 'ok', ...releaseInfo });
 
       if (pathname.startsWith(WEBHOOK_ROUTE)) {
         const accountId = pathname.slice(WEBHOOK_ROUTE.length);
@@ -329,6 +352,7 @@ export function createServer({ fetchApi = globalThis.fetch, secureCookies = fals
         sessions.delete(token);
         current = undefined;
       }
+      restoreAttempt(current);
 
       if (pathname === '/api/session') {
         if (method === 'GET') return json(response, 200, sessionView(current));
@@ -338,24 +362,20 @@ export function createServer({ fetchApi = globalThis.fetch, secureCookies = fals
           return json(response, 200, { connected: false });
         }
         if (method === 'POST') {
-          if (current?.attempt?.pending) {
-            throw new HttpError(409, 'attempt_pending', 'Retome o pedido pendente antes de trocar de conta.');
-          }
           const data = await readJson(request);
           const key = typeof data?.key === 'string' ? data.key.trim() : '';
           if (!/^lbt_live_[A-Za-z0-9_-]{1,240}$/.test(key)) {
             throw new HttpError(400, 'invalid_key', 'Informe uma chave válida da Lobbito que comece com lbt_live_.');
           }
           const { account, accountId } = await lookupAccount(fetchApi, key);
-          if (sessions.get(token)?.attempt?.pending) {
-            throw new HttpError(409, 'attempt_pending', 'Retome o pedido pendente antes de trocar de conta.');
-          }
           pruneExpired();
           if (!current && sessions.size >= SESSION_LIMIT) {
             throw new HttpError(503, 'session_capacity', 'O portal está temporariamente ocupado. Tente novamente em instantes.');
           }
           const id = randomBytes(32).toString('hex');
           const newSession = { key, account, accountId, expires: Date.now() + SESSION_TTL * 1000 };
+          if (current?.accountId === accountId) newSession.attempt = current?.attempt;
+          restoreAttempt(newSession);
           sessions.delete(token);
           sessions.set(id, newSession);
           setSessionCookie(response, id, secure);
@@ -400,21 +420,62 @@ export function createServer({ fetchApi = globalThis.fetch, secureCookies = fals
         if (sessions.get(token) !== current || current.expires <= Date.now()) {
           throw new HttpError(401, 'session_required', 'Conecte sua chave da Lobbito para continuar.');
         }
-        if (current.attempt?.pending) {
+        if (!current.accountId) throw invalidResponse();
+        const attempt = { key: randomUUID(), payload, pending: true };
+        if (current.attempt?.pending || !attempts.begin(current.accountId, attempt.key)) {
           throw new HttpError(409, 'attempt_pending', 'Acompanhe ou retome o pedido atual antes de criar outra sala.');
         }
-        const attempt = { key: randomUUID(), payload, pending: true };
         current.attempt = attempt;
-        await sendAttempt(fetchApi, current, attempt, response);
+        await sendAttempt(fetchApi, current, attempt, response, syncAttempt);
         return;
       }
       if (method === 'POST' && pathname === '/api/retry') {
         const attempt = current.attempt;
-        if (!attempt?.pending || !attempt.payload) throw new HttpError(409, 'no_pending_attempt', 'Não há pedido pendente para retomar.');
+        if (!attempt?.pending) throw new HttpError(409, 'no_pending_attempt', 'Não há pedido pendente para retomar.');
         if (attempt.inFlight) throw new HttpError(409, 'attempt_pending', 'O pedido atual ainda está sendo enviado.');
-        if (attempt.room) return json(response, 202, { room: attempt.room });
-        await sendAttempt(fetchApi, current, attempt, response);
+        const knownId = attempt.room?.id ?? attempt.roomId;
+        if (knownId || !attempt.payload) {
+          attempt.inFlight = true;
+          try {
+            const room = knownId ? await lookupRoom(fetchApi, current, knownId)
+              : publicRoom((await lobbito(fetchApi, current.key, `/v1/room-requests/${attempt.key}`)).data,
+                  { includeCharacterValidation: true });
+            if (!room) throw invalidResponse();
+            assignRoom(attempt, room);
+            syncAttempt(current, attempt);
+            return json(response, attempt.pending ? 202 : 200, { room });
+          } catch (error) {
+            if (!knownId && error instanceof HttpError && error.code === 'not_found') {
+              attempt.canClose = true;
+              throw new HttpError(409, 'request_unconfirmed',
+                'A Arena ainda não encontrou uma sala para este protocolo. Você pode verificar de novo ou encerrar o pedido.');
+            }
+            throw error;
+          } finally {
+            attempt.inFlight = false;
+          }
+        }
+        await sendAttempt(fetchApi, current, attempt, response, syncAttempt);
         return;
+      }
+      if (method === 'DELETE' && pathname === '/api/retry') {
+        const attempt = current.attempt;
+        if (!attempt?.pending || !attempt.canClose || attempt.inFlight) {
+          throw new HttpError(409, 'attempt_pending', 'Verifique o protocolo do pedido antes de tentar encerrá-lo.');
+        }
+        attempt.inFlight = true;
+        try {
+          const { data } = await lobbito(fetchApi, current.key, `/v1/room-requests/${attempt.key}`, { method: 'DELETE' });
+          if (data?.ok !== true) throw invalidResponse();
+          attempts.finish(current.accountId, attempt.key);
+          current.attempt = undefined;
+          return json(response, 200, { closed: true });
+        } catch (error) {
+          if (error instanceof HttpError && error.code === 'request_received') attempt.canClose = false;
+          throw error;
+        } finally {
+          attempt.inFlight = false;
+        }
       }
       if (pathname.startsWith('/api/rooms/')) {
         const [id, action, ...extra] = pathname.slice('/api/rooms/'.length).split('/');
@@ -422,10 +483,12 @@ export function createServer({ fetchApi = globalThis.fetch, secureCookies = fals
           if (method === 'GET' && action === undefined) {
             const room = withReceivedResult(current, await lookupRoom(fetchApi, current, id));
             rememberRoom(current, room);
+            if (current.attempt?.room?.id === room.id) syncAttempt(current, current.attempt);
             return json(response, 200, room);
           }
           if (method === 'POST' && ['start', 'cancel'].includes(action)) {
             const { room, status } = await roomAction(fetchApi, current, id, action);
+            if (room && current.attempt?.room?.id === room.id) syncAttempt(current, current.attempt);
             return json(response, status, { room: room && withReceivedResult(current, room) });
           }
         }
@@ -447,6 +510,7 @@ export function createServer({ fetchApi = globalThis.fetch, secureCookies = fals
     clearInterval(expirySweep);
     sessions.clear();
     webhooks?.close();
+    attempts.close();
   });
   return server;
 }
@@ -474,11 +538,12 @@ async function configuredWebhooks() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT ?? 3080);
-  const host = process.env.HOST ?? '127.0.0.1';
+  const host = process.env.HOST ?? (process.env.PORT ? '0.0.0.0' : '127.0.0.1');
   const allowedOrigin = process.env.PORTAL_ORIGIN ? new URL(process.env.PORTAL_ORIGIN).origin : undefined;
   const secureCookies = process.env.SECURE_COOKIES === 'true' || (allowedOrigin?.startsWith('https://') ?? false);
   const webhooks = await configuredWebhooks();
-  createServer({ allowedOrigin, secureCookies, webhooks }).listen(port, host, () => {
+  const attempts = openAttempts(resolve(process.env.LOBBITO_ATTEMPTS_DB || 'data/lobbito-attempts.sqlite'));
+  createServer({ allowedOrigin, secureCookies, webhooks, attempts }).listen(port, host, () => {
     console.log(`Portal de Salas disponível em http://${host}:${port}`);
   });
 }

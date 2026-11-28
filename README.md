@@ -27,7 +27,9 @@ Se baixou o ZIP, execute `npm start` na pasta extraída. O projeto usa os módul
 3. Em **Bloqueio de personagens** ou **Regras de pets**, busque e marque os itens que devem ficar fora da partida. Em **Opções avançadas**, ajuste as outras regras ou cadastre os jogadores para ativar o início automático.
 4. Clique em **Criar sala**. Quando a Lobbito confirmar a criação, copie o ID e a senha para compartilhar com os jogadores.
 
-O **Histórico de salas** consulta as salas da conta diretamente na API. Cada sessão acompanha um pedido de criação por vez até a confirmação. Se a conexão cair antes da confirmação, **Verificar pedido** reenvia a mesma configuração com o mesmo identificador de idempotência. Essa recuperação está disponível durante a mesma sessão do portal. Após expirar, desconectar ou reiniciar o servidor, consulte o histórico da conta antes de enviar outro pedido.
+Use **Predefinição** para preencher as opções de Duplas CS, CS só capa ou Esquadrão BR e ajuste o restante antes de criar a sala. **Experimentar demonstração** simula a criação, o início e o resultado no navegador, sem chave e sem consumir cota.
+
+O **Histórico de salas** consulta as salas da própria conta. Se a conexão cair, **Verificar pedido** reutiliza o mesmo protocolo. Ao reconectar após um reinício, o portal consulta a Arena pelo protocolo ou pelo ID que a Arena já confirmou. Se a Arena ainda estiver sem uma sala para o pedido, **Encerrar pedido sem sala** bloqueia a criação com aquele protocolo e libera um novo pedido. A Arena só permite encerrar dessa forma quando o protocolo ainda não está vinculado a uma sala.
 
 ## Bloqueio de personagens
 
@@ -58,18 +60,20 @@ O servidor verifica a assinatura HMAC e o horário de cada entrega antes de grav
 
 ## Hospedar para clientes
 
-Execute `npm start` em um serviço Node.js persistente atrás de um proxy HTTPS. Configure o proxy para aceitar respostas de pelo menos 60 segundos. O envio inicial à Lobbito tem limite de 50 segundos.
+Na ShardCloud, conecte o repositório GitHub. O manifesto `.shardcloud` inicia o serviço com Node.js 24. Configure a origem pública e use um volume persistente para SQLite. Em outros serviços Node.js, execute `npm start` atrás de um proxy HTTPS. Configure o proxy para aceitar respostas de pelo menos 60 segundos. O envio inicial à Lobbito tem limite de 50 segundos.
 
 | Variável | Uso |
 | --- | --- |
 | `PORT` | Porta HTTP interna. Padrão `3080`. |
-| `HOST` | Endereço de escuta. Padrão `127.0.0.1`. Use `0.0.0.0` se a plataforma encaminhar as solicitações por rede interna. |
+| `HOST` | Endereço de escuta. Padrão `127.0.0.1` local ou `0.0.0.0` quando a hospedagem define `PORT`. |
 | `PORTAL_ORIGIN` | Origem pública exata, por exemplo `https://salas.example.com`. HTTPS ativa o atributo `Secure` no cookie. |
 | `SECURE_COOKIES` | Defina `true` em produção para exigir cookie seguro. |
 | `LOBBITO_WEBHOOK_SECRETS` | Objeto JSON com os IDs `acct_…` e seus segredos `whsec_…`. Configure quando quiser receber webhooks. |
+| `RELEASE_SHA` | SHA completo da versão em pacotes sem metadados do Git. A rota `/health` expõe o commit e a hora de início da instância. |
+| `LOBBITO_ATTEMPTS_DB` | Banco SQLite de protocolos pendentes. O padrão é `data/lobbito-attempts.sqlite`. Use um volume persistente. |
 | `LOBBITO_WEBHOOK_DB` | Caminho para o banco SQLite de resultados. O padrão é `data/lobbito-results.sqlite`. Use um caminho em volume persistente na hospedagem. |
 
-Provisione uma instância persistente. A chave e o pedido pendente ficam na memória da instância durante a sessão, que dura duas horas. O navegador recebe um cookie de sessão `HttpOnly` e `SameSite=Strict`. Em uma hospedagem compartilhada, limite o acesso administrativo e mantenha logs do proxy sem cabeçalhos de autenticação, cookies ou corpos das solicitações. Reiniciar a instância encerra as sessões, e os clientes podem reconectar suas chaves.
+A chave da API fica em memória durante a sessão, que dura duas horas. O navegador recebe um cookie de sessão `HttpOnly` e `SameSite=Strict`. Os protocolos pendentes ficam em SQLite por conta, com o identificador do pedido e da sala quando disponível. Reiniciar a instância encerra as sessões. Depois de reconectar a chave, o cliente pode consultar o mesmo pedido.
 
 ## Verificar
 

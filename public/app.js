@@ -1,3 +1,5 @@
+import { createDemoApi, presets } from './demo.js';
+
 const byId = (id) => document.getElementById(id);
 const roomForm = byId('room-form');
 const connectionForm = byId('connection-form');
@@ -49,6 +51,7 @@ let historyRooms = [];
 let inboxTimer;
 let inboxLoading = false;
 let inboxState;
+let demo;
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -90,6 +93,7 @@ function modeLabel(id) {
 }
 
 async function api(path, { method = 'GET', body } = {}) {
+  if (demo) return demo(path, { method, body });
   const response = await fetch(`/api${path}`, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
@@ -277,7 +281,7 @@ function renderSummary() {
   ]);
   const blocked = Boolean(submitting || roomAction || attempt?.pending);
   byId('create').disabled = blocked || !mode;
-  byId('create-label').textContent = submitting ? 'Enviando pedido…' : attempt?.pending ? 'Aguardando pedido anterior' : 'Criar sala';
+  byId('create-label').textContent = submitting ? 'Enviando pedido…' : attempt?.pending ? 'Aguardando pedido anterior' : demo ? 'Simular criação' : 'Criar sala';
   const trackWithoutTeams = isBr || byId('use-teams').checked;
   byId('auto-result').disabled = !trackWithoutTeams;
   byId('auto-result-hint').textContent = trackWithoutTeams
@@ -299,12 +303,15 @@ function renderAccount(account) {
 }
 
 function renderConnection(account) {
-  byId('connection-label').textContent = connected ? 'API conectada' : 'API desconectada';
+  byId('connection-label').textContent = demo ? 'Demonstração' : connected ? 'API conectada' : 'API desconectada';
   byId('connection-state').classList.toggle('is-connected', connected);
-  byId('connection-description').textContent = connected ? 'Saldo e uso de salas da sua conta.' : 'Use a chave da sua conta Lobbito.';
+  byId('connection-description').textContent = demo ? 'Salas e resultados simulados neste navegador.'
+    : connected ? 'Saldo e uso de salas da sua conta.' : 'Use a chave da sua conta Lobbito.';
   connectionForm.hidden = connected;
   byId('connected').hidden = !connected;
   byId('get-key').hidden = connected;
+  byId('start-demo').hidden = connected;
+  byId('disconnect').textContent = demo ? 'Sair da demonstração' : 'Desconectar';
   byId('disconnect').disabled = Boolean(submitting || attempt?.inFlight);
   byId('refresh-history').disabled = !connected || historyBusy;
   renderAccount(account);
@@ -419,9 +426,11 @@ function showResult() {
   if (byId('result-status').textContent !== info[0]) byId('result-status').textContent = info[0];
   byId('result-status').dataset.kind = info[1];
   const message = byId('result-message');
-  message.textContent = room?.status === 'WAITING_PLAYERS' && room.autoStart === false
-    ? `${info[2]} Inicie quando todos estiverem prontos.` : info[2];
+  message.textContent = demo && room?.status === 'WAITING_PLAYERS' ? 'Sala simulada pronta. Inicie para acompanhar o resultado.'
+    : room?.status === 'WAITING_PLAYERS' && room.autoStart === false
+      ? `${info[2]} Inicie quando todos estiverem prontos.` : info[2];
   const details = [];
+  if (needsRecovery && attempt.protocol) details.push(['Protocolo do pedido', attempt.protocol]);
   if (room?.roomId) details.push(['ID no jogo', room.roomId]);
   if (room?.status === 'WAITING_PLAYERS' && room.password) details.push(['Senha', room.password]);
   if (room?.joinDeadline) details.push(['Entrada até', date(room.joinDeadline)]);
@@ -440,6 +449,8 @@ function showResult() {
   byId('retry-room').hidden = !needsRecovery || attempt?.inFlight;
   byId('retry-room').textContent = viewingAttempt ? 'Verificar pedido' : 'Verificar pedido pendente';
   byId('retry-room').disabled = submitting;
+  byId('close-pending').hidden = !needsRecovery || !attempt.canClose;
+  byId('close-pending').disabled = submitting || Boolean(attempt?.inFlight);
   byId('disconnect').disabled = Boolean(roomAction || submitting || attempt?.inFlight);
 }
 
@@ -574,6 +585,7 @@ function beginSession(session) {
   void loadModes();
   void loadHistory();
   void loadInbox();
+  if (attempt?.pending && !attempt.inFlight && !attempt.room) void sendRoom(undefined, true);
 }
 
 function parseIds(value) {
@@ -938,6 +950,20 @@ roomForm.addEventListener('invalid', (event) => {
   const group = event.target.closest('details');
   if (group) group.open = true;
 }, true);
+byId('room-preset').addEventListener('change', (event) => {
+  const preset = presets[event.target.value];
+  if (!preset) return;
+  family = preset.family;
+  roomForm.querySelector(`[name="family"][value="${family}"]`).checked = true;
+  renderModes(preset.mode);
+  byId('deadline').value = preset.minutes;
+  byId('rule-gloo').value = preset.gloo ?? '';
+  byId('rule-headshots').value = preset.headshots ?? '';
+  if (preset.capacity && [...byId('capacity').options].some(option => Number(option.value) === preset.capacity)) {
+    byId('capacity').value = preset.capacity;
+  }
+  renderSummary();
+});
 roomForm.addEventListener('submit', (event) => {
   event.preventDefault();
   if (!connected) {
@@ -970,11 +996,17 @@ connectionForm.addEventListener('submit', async (event) => {
     connect.textContent = 'Conectar à API';
   }
 });
+byId('start-demo').addEventListener('click', async () => {
+  if (connected || byId('connect').disabled) return;
+  demo = createDemoApi(defaultModes);
+  beginSession(await demo('/session'));
+});
 byId('disconnect').addEventListener('click', async () => {
   const disconnect = byId('disconnect');
   disconnect.disabled = true;
   try {
     await api('/session', { method: 'DELETE' });
+    demo = undefined;
     resetSession();
     byId('room-password').value = '';
     renderSummary();
@@ -1006,6 +1038,29 @@ byId('refresh-room').addEventListener('click', () => {
   if (room?.id) void checkRoom(room.id);
 });
 byId('retry-room').addEventListener('click', () => void sendRoom(undefined, true));
+byId('close-pending').addEventListener('click', async () => {
+  if (submitting || !attempt?.canClose) return;
+  const version = sessionVersion;
+  submitting = true;
+  showResult();
+  renderSummary();
+  try {
+    await api('/retry', { method: 'DELETE' });
+    if (version !== sessionVersion) return;
+    updateAttempt(undefined);
+    notice('form-message', 'Pedido encerrado. Você pode criar outra sala.', 'success');
+  } catch (error) {
+    if (handleAuth(error, version)) return;
+    notice('form-message', serverMessage(error), 'error');
+    await recoverSessionAttempt();
+  } finally {
+    if (version === sessionVersion) {
+      submitting = false;
+      showResult();
+      renderSummary();
+    }
+  }
+});
 byId('start-room').addEventListener('click', () => void manageRoom('start', displayedRoom()?.id));
 byId('cancel-room').addEventListener('click', () => {
   const id = displayedRoom()?.id;

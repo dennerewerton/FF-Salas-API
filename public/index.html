@@ -46,6 +46,15 @@
           <section class="panel form-panel" aria-labelledby="config-title">
             <div class="panel-head"><h2 id="config-title">Configuração da sala</h2><p>Escolha como a partida vai funcionar.</p></div>
             <form id="room-form">
+              <div class="field">
+                <label for="room-preset">Predefinição</label>
+                <select id="room-preset">
+                  <option value="">Personalizar</option>
+                  <option value="cs-duplas">Contra Squad · treino em duplas</option>
+                  <option value="cs-capa">Contra Squad · 4x4 só capa e gelo infinito</option>
+                  <option value="br-squad">Battle Royale · esquadrão com 48 vagas</option>
+                </select>
+              </div>
               <fieldset class="mode-section">
                 <legend>Tipo de partida</legend>
                 <div class="segments">
@@ -208,6 +217,7 @@
                   <button type="button" class="button secondary" id="copy-room" hidden>Copiar acesso</button>
                   <button type="button" class="button secondary" id="refresh-room" hidden>Atualizar status</button>
                   <button type="button" class="button secondary" id="retry-room" hidden>Verificar pedido</button>
+                  <button type="button" class="button secondary" id="close-pending" hidden>Encerrar pedido sem sala</button>
                 </div>
                 <p id="room-action-message" class="notice" aria-live="polite" hidden></p>
               </section>
@@ -224,6 +234,7 @@
                 <button type="button" class="button secondary" id="disconnect">Desconectar</button>
               </div>
               <p id="connection-message" class="notice" aria-live="polite" hidden></p>
+              <button id="start-demo" class="button secondary" type="button">Experimentar demonstração</button>
               <a id="get-key" class="text-link" href="https://api.lobbito.com.br/painel" target="_blank" rel="noopener noreferrer">Obter chave no painel <span class="sr-only">(nova aba)</span></a>
             </section>
           </div>
